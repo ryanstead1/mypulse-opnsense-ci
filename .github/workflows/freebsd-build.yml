@@ -1,0 +1,166 @@
+name: myPulse FreeBSD package build
+
+run-name: "myPulse ${{ inputs.request_id }} @ ${{ inputs.gitlab_sha }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      gitlab_sha:
+        description: Exact GitLab commit to build
+        required: true
+        type: string
+
+      gitlab_ref:
+        description: GitLab branch or tag containing the commit
+        required: true
+        type: string
+
+      request_id:
+        description: Calling GitLab pipeline/job identifier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  freebsd15:
+    name: FreeBSD 15.1 amd64 package
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Fetch exact source from GitLab
+        shell: bash
+        env:
+          GITLAB_SHA: ${{ inputs.gitlab_sha }}
+          GITLAB_REF: ${{ inputs.gitlab_ref }}
+        run: |
+          set -euo pipefail
+
+          echo "GitLab ref: $GITLAB_REF"
+          echo "GitLab SHA: $GITLAB_SHA"
+
+          git clone \
+            --recurse-submodules \
+            --branch "$GITLAB_REF" \
+            https://gitlab.com/ryanstead/pulse-agent-opnsense.git \
+            source
+
+          cd source
+
+          if ! git checkout --detach "$GITLAB_SHA"; then
+              git fetch origin "$GITLAB_SHA"
+              git checkout --detach "$GITLAB_SHA"
+          fi
+
+          git submodule update --init --recursive
+
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+
+          echo "Requested: $GITLAB_SHA"
+          echo "Checked out: $ACTUAL_SHA"
+
+          test "$ACTUAL_SHA" = "$GITLAB_SHA"
+
+      - name: Start FreeBSD 15.1
+        uses: cross-platform-actions/action@v1.5.0
+        with:
+          operating_system: freebsd
+          architecture: x86-64
+          version: '15.1'
+          memory: 6G
+          cpu_count: 2
+          sync_files: true
+
+      - name: Build native FreeBSD package
+        shell: cpa.sh {0}
+        run: |
+          set -eu
+
+          cd source
+
+          echo "======================================================"
+          echo " myPulse FreeBSD 15.1 GitHub CI"
+          echo "======================================================"
+
+          echo
+          echo "=== PLATFORM ==="
+
+          uname -a
+          freebsd-version
+
+          test "$(uname -m)" = "amd64"
+          test "$(freebsd-version -u | cut -d. -f1)" = "15"
+
+          echo
+          echo "=== DEPENDENCIES ==="
+
+          sudo pkg install -y rust git pkgconf
+
+          rustc --version
+          cargo --version
+          pkg --version
+
+          echo
+          echo "=== SOURCE ==="
+
+          git rev-parse HEAD
+          git submodule status
+          cat VERSION
+
+          echo
+          echo "=== VALIDATION ==="
+
+          ./scripts/check.sh
+          git diff --check
+          sh -n scripts/build.sh
+          sh -n src/opnsense/root/usr/local/sbin/olilo-mypulse-control
+          sh -n src/opnsense/root/usr/local/etc/rc.d/olilo_mypulse
+
+          echo
+          echo "=== CLEAN BUILD ==="
+
+          rm -rf build dist src/agent/target
+
+          make package
+
+          VERSION="$(cat VERSION)"
+          PKG="dist/os-mypulse-${VERSION}.pkg"
+
+          test -f "$PKG"
+
+          echo
+          echo "=== PACKAGE ==="
+
+          pkg info -F "$PKG"
+
+          ABI="$(
+              pkg info -F "$PKG" |
+              awk '/^Architecture/ {print $3}'
+          )"
+
+          echo "ABI=$ABI"
+
+          test "$ABI" = "FreeBSD:15:amd64"
+
+          echo "ABI CHECK: PASS"
+
+          echo
+          echo "=== SHA256 ==="
+
+          sha256 "$PKG"
+          cat "$PKG.sha256"
+
+          echo
+          echo "======================================================"
+          echo " FreeBSD PACKAGE BUILD: PASS"
+          echo "======================================================"
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: os-mypulse-${{ inputs.gitlab_sha }}
+          path: source/dist/
+          if-no-files-found: error
+          retention-days: 14
