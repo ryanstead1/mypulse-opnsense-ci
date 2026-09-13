@@ -1,20 +1,10 @@
-name: myPulse FreeBSD package build
+name: myPulse GitLab FreeBSD runner
 
-run-name: "myPulse ${{ inputs.request_id }} @ ${{ inputs.gitlab_sha }}"
+run-name: "GitLab FreeBSD runner ${{ inputs.request_id }}"
 
 on:
   workflow_dispatch:
     inputs:
-      gitlab_sha:
-        description: Exact GitLab commit to build
-        required: true
-        type: string
-
-      gitlab_ref:
-        description: GitLab branch or tag containing the commit
-        required: true
-        type: string
-
       request_id:
         description: Calling GitLab pipeline/job identifier
         required: true
@@ -25,43 +15,22 @@ permissions:
 
 jobs:
   freebsd15:
-    name: FreeBSD 15.1 amd64 package
+    name: FreeBSD 15.1 GitLab worker
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
-      - name: Fetch exact source from GitLab
+      - name: Stage GitLab runner token
         shell: bash
         env:
-          GITLAB_SHA: ${{ inputs.gitlab_sha }}
-          GITLAB_REF: ${{ inputs.gitlab_ref }}
+          RUNNER_TOKEN: ${{ secrets.GITLAB_RUNNER_TOKEN }}
         run: |
           set -euo pipefail
 
-          echo "GitLab ref: $GITLAB_REF"
-          echo "GitLab SHA: $GITLAB_SHA"
+          test -n "$RUNNER_TOKEN"
 
-          git clone \
-            --recurse-submodules \
-            --branch "$GITLAB_REF" \
-            https://gitlab.com/ryanstead/pulse-agent-opnsense.git \
-            source
-
-          cd source
-
-          if ! git checkout --detach "$GITLAB_SHA"; then
-              git fetch origin "$GITLAB_SHA"
-              git checkout --detach "$GITLAB_SHA"
-          fi
-
-          git submodule update --init --recursive
-
-          ACTUAL_SHA="$(git rev-parse HEAD)"
-
-          echo "Requested: $GITLAB_SHA"
-          echo "Checked out: $ACTUAL_SHA"
-
-          test "$ACTUAL_SHA" = "$GITLAB_SHA"
+          umask 077
+          printf '%s' "$RUNNER_TOKEN" > .gitlab-runner-token
 
       - name: Start FreeBSD 15.1
         uses: cross-platform-actions/action@v1.5.0
@@ -73,16 +42,19 @@ jobs:
           cpu_count: 2
           sync_files: true
 
-      - name: Build native FreeBSD package
+      - name: Run one isolated GitLab job
         shell: cpa.sh {0}
         run: |
           set -eu
 
-          cd source
+          echo "======================================================"
+          echo " myPulse ephemeral GitLab FreeBSD 15.1 worker"
+          echo "======================================================"
 
-          echo "======================================================"
-          echo " myPulse FreeBSD 15.1 GitHub CI"
-          echo "======================================================"
+          test -s .gitlab-runner-token
+
+          TOKEN="$(cat .gitlab-runner-token)"
+          rm -f .gitlab-runner-token
 
           echo
           echo "=== PLATFORM ==="
@@ -94,73 +66,120 @@ jobs:
           test "$(freebsd-version -u | cut -d. -f1)" = "15"
 
           echo
-          echo "=== DEPENDENCIES ==="
+          echo "=== PACKAGES ==="
 
-          sudo pkg install -y rust git pkgconf
+          sudo pkg install -y \
+            gitlab-runner \
+            rust \
+            git \
+            pkgconf \
+            bash
 
+          gitlab-runner --version
           rustc --version
           cargo --version
-          pkg --version
 
           echo
-          echo "=== SOURCE ==="
+          echo "=== ISOLATED BUILD USER ==="
 
-          git rev-parse HEAD
-          git submodule status
-          cat VERSION
+          if ! pw groupshow mypulse-ci >/dev/null 2>&1; then
+              sudo pw groupadd -n mypulse-ci
+          fi
+
+          if ! id mypulse-ci >/dev/null 2>&1; then
+              sudo pw useradd \
+                -n mypulse-ci \
+                -g mypulse-ci \
+                -m \
+                -d /home/mypulse-ci \
+                -s /usr/local/bin/bash
+          fi
+
+          sudo install \
+            -d \
+            -m 700 \
+            -o mypulse-ci \
+            -g mypulse-ci \
+            /home/mypulse-ci/.ssh
+
+          ssh-keygen \
+            -q \
+            -t ed25519 \
+            -N '' \
+            -f /tmp/mypulse-ci-key
+
+          sudo install \
+            -m 600 \
+            -o root \
+            -g wheel \
+            /tmp/mypulse-ci-key \
+            /root/mypulse-ci-key
+
+          sudo install \
+            -m 600 \
+            -o mypulse-ci \
+            -g mypulse-ci \
+            /tmp/mypulse-ci-key.pub \
+            /home/mypulse-ci/.ssh/authorized_keys
+
+          rm -f \
+            /tmp/mypulse-ci-key \
+            /tmp/mypulse-ci-key.pub
 
           echo
-          echo "=== VALIDATION ==="
+          echo "=== RUNNER CONFIG ==="
 
-          ./scripts/check.sh
-          git diff --check
-          sh -n scripts/build.sh
-          sh -n src/opnsense/root/usr/local/sbin/olilo-mypulse-control
-          sh -n src/opnsense/root/usr/local/etc/rc.d/olilo_mypulse
+          cat > /tmp/mypulse-runner.toml <<EOF
+          concurrent = 1
+          check_interval = 0
 
-          echo
-          echo "=== CLEAN BUILD ==="
+          [[runners]]
+            name = "github-freebsd15-ephemeral"
+            url = "https://gitlab.com/"
+            token = "$TOKEN"
+            executor = "ssh"
 
-          rm -rf build dist src/agent/target
+            [runners.ssh]
+              host = "127.0.0.1"
+              port = "22"
+              user = "mypulse-ci"
+              identity_file = "/root/mypulse-ci-key"
+              disable_strict_host_key_checking = true
+          EOF
 
-          make package
+          sudo install \
+            -d \
+            -m 700 \
+            /root/.gitlab-runner
 
-          VERSION="$(cat VERSION)"
-          PKG="dist/os-mypulse-${VERSION}.pkg"
+          sudo install \
+            -m 600 \
+            /tmp/mypulse-runner.toml \
+            /root/.gitlab-runner/config.toml
 
-          test -f "$PKG"
-
-          echo
-          echo "=== PACKAGE ==="
-
-          pkg info -F "$PKG"
-
-          ABI="$(
-              pkg info -F "$PKG" |
-              awk '/^Architecture/ {print $3}'
-          )"
-
-          echo "ABI=$ABI"
-
-          test "$ABI" = "FreeBSD:15:amd64"
-
-          echo "ABI CHECK: PASS"
+          rm -f /tmp/mypulse-runner.toml
+          unset TOKEN
 
           echo
-          echo "=== SHA256 ==="
+          echo "=== LOCAL SSH ISOLATION TEST ==="
 
-          sha256 "$PKG"
-          cat "$PKG.sha256"
+          sudo ssh \
+            -i /root/mypulse-ci-key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            mypulse-ci@127.0.0.1 \
+            'id && /usr/local/bin/bash --version | head -1'
+
+          echo
+          echo "=== WAITING FOR ONE GITLAB JOB ==="
+
+          sudo gitlab-runner run-single \
+            --config /root/.gitlab-runner/config.toml \
+            --runner github-freebsd15-ephemeral \
+            --max-builds 1 \
+            --wait-timeout 1200
 
           echo
           echo "======================================================"
-          echo " FreeBSD PACKAGE BUILD: PASS"
+          echo " GitLab job complete - destroying worker"
           echo "======================================================"
-
-      - name: Upload package artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: os-mypulse-${{ inputs.gitlab_sha }}
-          path: source/dist/
-          if-no-files-found: error
-          retention-days: 14
