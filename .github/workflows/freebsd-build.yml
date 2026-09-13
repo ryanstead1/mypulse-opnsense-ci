@@ -175,7 +175,7 @@ jobs:
 
           sudo gitlab-runner run-single \
             --config /root/.gitlab-runner/config.toml \
-            --runner github-freebsd15-ephemeral \
+            -r github-freebsd15-ephemeral \
             --max-builds 1 \
             --wait-timeout 1200
 
