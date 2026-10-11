@@ -1,0 +1,69 @@
+name: myPulse RC2 direct FreeBSD 15.1 package verification
+
+run-name: "FreeBSD RC2 build ${{ inputs.request_id }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: "Traceable build request"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  freebsd-rc2:
+    name: FreeBSD 15.1 native tests and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Boot isolated FreeBSD 15.1
+        uses: cross-platform-actions/action@v1.5.0
+        with:
+          operating_system: freebsd
+          architecture: x86-64
+          version: '15.1'
+          memory: 8G
+          cpu_count: 4
+          sync_files: true
+
+      - name: Validate immutable RC2 source and build native package
+        shell: cpa.sh {0}
+        run: |
+          set -eu
+          export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
+          SOURCE_SHA=abf9c02b0e5a1780140f0193ee36e65f8ff0b93d
+          OUTPUT_ROOT="$(pwd)/rc2-artifacts"
+          mkdir -p "$OUTPUT_ROOT"
+          uname -a
+          freebsd-version
+          test "$(uname -m)" = amd64
+          test "$(freebsd-version -u | cut -d. -f1)" = 15
+          sudo pkg install -y git rust php84 php84-simplexml bash pkgconf cmake python3 jq
+          git clone --recurse-submodules https://gitlab.com/team-olilo/pulse-agent-opnsense.git rc2-checkout
+          cd rc2-checkout
+          git checkout --detach "$SOURCE_SHA"
+          git submodule update --init --recursive
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(cat VERSION)" = "1.1.3"
+          git submodule status
+          ./scripts/check.sh
+          sh scripts/test-fib-suite.sh
+          make package
+          test -f dist/os-mypulse-1.1.3.pkg
+          pkg info -F dist/os-mypulse-1.1.3.pkg
+          sha256 dist/os-mypulse-1.1.3.pkg
+          cp dist/os-mypulse-1.1.3.pkg "$OUTPUT_ROOT/"
+          cp dist/os-mypulse-1.1.3.pkg.sha256 "$OUTPUT_ROOT/"
+          printf 'Source commit: %s\nPlatform: FreeBSD 15.1 amd64\n' "$SOURCE_SHA" > "$OUTPUT_ROOT/build-manifest.txt"
+          echo "Native package built and staged into rc2-artifacts"
+
+      - name: Publish native package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: os-mypulse-1.1.3-rc2-freebsd15
+          path: rc2-artifacts/
+          if-no-files-found: error
+          retention-days: 14
