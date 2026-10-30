@@ -44,7 +44,7 @@ jobs:
           freebsd-version
           test "$(uname -m)" = amd64
           test "$(freebsd-version -u | cut -d. -f1)" = 15
-          sudo pkg install -y git rust php84 php84-simplexml bash pkgconf cmake python3 jq
+          sudo pkg install -y git rust php84 php84-simplexml bash pkgconf cmake-core python3 jq
           git clone --recurse-submodules https://gitlab.com/team-olilo/pulse-agent-opnsense.git rc2-checkout
           cd rc2-checkout
           git checkout --detach "$SOURCE_SHA"
