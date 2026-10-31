@@ -1,11 +1,12 @@
 name: myPulse RC2 direct FreeBSD 15.1 package verification
 
-run-name: "FreeBSD static-WAN RC2 verification"
+run-name: "FreeBSD configured static-gateway RC2 verification"
 
 on:
   push:
     branches:
       - ci/mypulse-static-wan-rc2-20261030
+      - ci/mypulse-static-gateway-rc2-20261031
   workflow_dispatch:
     inputs:
       request_id:
@@ -37,7 +38,7 @@ jobs:
         run: |
           set -eu
           export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
-          SOURCE_SHA=cf80d651e6d7903c00f52e1725a8a725ccb199d8
+          SOURCE_SHA=d96fda7b2e076ca80d14ae0793e2bb292ca8d6c4
           OUTPUT_ROOT="$(pwd)/rc2-artifacts"
           mkdir -p "$OUTPUT_ROOT"
           uname -a
