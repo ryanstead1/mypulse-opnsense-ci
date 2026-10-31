@@ -1,6 +1,6 @@
 name: myPulse RC2 direct FreeBSD 15.1 package verification
 
-run-name: "FreeBSD configured static-gateway RC2 verification"
+run-name: "FreeBSD corrected OPNsense Gateways RC2 verification"
 
 on:
   push:
@@ -38,7 +38,7 @@ jobs:
         run: |
           set -eu
           export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
-          SOURCE_SHA=d96fda7b2e076ca80d14ae0793e2bb292ca8d6c4
+          SOURCE_SHA=eaaab84b010f9f5276831ba8be018165e2d8e602
           OUTPUT_ROOT="$(pwd)/rc2-artifacts"
           mkdir -p "$OUTPUT_ROOT"
           uname -a
