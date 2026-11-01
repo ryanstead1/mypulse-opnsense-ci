@@ -38,7 +38,7 @@ jobs:
         run: |
           set -eu
           export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
-          SOURCE_SHA=3aae904e2eac64aa079898617fa986fc97011482
+          SOURCE_SHA=e1b4ed161d062e449981700de63d428a905d494d
           OUTPUT_ROOT="$(pwd)/rc2-artifacts"
           mkdir -p "$OUTPUT_ROOT"
           uname -a
