@@ -1,11 +1,12 @@
-name: myPulse RC2 direct FreeBSD 15.1 package verification
+name: myPulse development FreeBSD 15.1 verification
 
-run-name: "FreeBSD static-WAN RC2 verification"
+run-name: "FreeBSD 1.1.4-dev native validation"
 
 on:
   push:
     branches:
       - ci/mypulse-static-wan-rc2-20261030
+      - ci/mypulse-static-gateway-rc2-20261031
   workflow_dispatch:
     inputs:
       request_id:
@@ -37,7 +38,7 @@ jobs:
         run: |
           set -eu
           export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
-          SOURCE_SHA=cf80d651e6d7903c00f52e1725a8a725ccb199d8
+          SOURCE_SHA=e1b4ed161d062e449981700de63d428a905d494d
           OUTPUT_ROOT="$(pwd)/rc2-artifacts"
           mkdir -p "$OUTPUT_ROOT"
           uname -a
@@ -66,7 +67,7 @@ jobs:
       - name: Publish native package artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: os-mypulse-1.1.3-rc2-freebsd15
+          name: os-mypulse-1.1.4-dev-native-freebsd15
           path: rc2-artifacts/
           if-no-files-found: error
           retention-days: 14
