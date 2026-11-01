@@ -73,6 +73,7 @@ jobs:
             rust \
             git \
             pkgconf \
+            php84 \
             bash
 
           gitlab-runner --version
