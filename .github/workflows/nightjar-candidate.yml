@@ -1,0 +1,62 @@
+name: Nightjar isolated FreeBSD test package
+
+on:
+  push:
+    branches:
+      - project/nightjar-build
+
+permissions:
+  contents: read
+
+jobs:
+  nightjar:
+    name: Native FreeBSD 15.1 Nightjar build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Boot disposable FreeBSD 15.1
+        uses: cross-platform-actions/action@v1.5.0
+        with:
+          operating_system: freebsd
+          architecture: x86-64
+          version: '15.1'
+          memory: 8G
+          cpu_count: 4
+          sync_files: true
+
+      - name: Verify exact source and build package
+        shell: cpa.sh {0}
+        run: |
+          set -eu
+          export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
+          sudo pkg install -y git rust php84 php84-simplexml bash pkgconf cmake python3 jq openssl
+          test "$(uname -m)" = "amd64"
+          test "$(freebsd-version -u | cut -d. -f1)" = "15"
+          git clone --recurse-submodules https://gitlab.com/team-olilo/pulse-agent-opnsense.git nightjar-src
+          cd nightjar-src
+          git checkout --detach e747618bc296107fec7119c9e8adee4d5796c986
+          test "$(git rev-parse HEAD)" = e747618bc296107fec7119c9e8adee4d5796c986
+          sh scripts/prepare-nightjar-agent.sh
+          test "$(git -C src/agent rev-parse HEAD)" = cc5b6fc2b9b054a4d5dc39ffd44095b35db4661a
+          test "$(cat VERSION)" = "1.1.5"
+          cargo test --locked --manifest-path src/agent/Cargo.toml
+          sh scripts/test-release-signatures.sh
+          sh scripts/test-nightjar-hardening.sh
+          sh scripts/test-release-gates.sh
+          sh scripts/test-agent-pin.sh
+          sh scripts/test-installer-guards.sh
+          sh scripts/test-fib-suite.sh
+          make package
+          pkg info -F dist/os-mypulse-1.1.5.pkg
+          sha256 dist/os-mypulse-1.1.5.pkg
+          mkdir -p ../nightjar-artifacts
+          cp dist/os-mypulse-1.1.5.pkg dist/os-mypulse-1.1.5.pkg.sha256 ../nightjar-artifacts/
+          printf 'Plugin source SHA: e747618bc296107fec7119c9e8adee4d5796c986\nAgent source SHA: cc5b6fc2b9b054a4d5dc39ffd44095b35db4661a\nPackage: 1.1.5 isolated test candidate (not signed or published)\n' > ../nightjar-artifacts/manifest.txt
+
+      - name: Upload private test-candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightjar-os-mypulse-1.1.5-test-only
+          path: nightjar-artifacts/
+          if-no-files-found: error
+          retention-days: 7
